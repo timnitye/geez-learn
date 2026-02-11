@@ -100,6 +100,18 @@ export const TIER_COLORS = {
 // How many consonant families are initially unlocked
 export const INITIAL_UNLOCK_COUNT = 4;
 
+// ── Audio ────────────────────────────────────────────────────────
+// Generate audio file path for a character
+// vowelIndex is 0-6 (from VOWEL_ORDERS), but audio files use 1-7 naming
+export function getAudioPath(familyId, vowelIndex) {
+  return `/audio/geez/geez_${familyId}_${vowelIndex + 1}.mp3`;
+}
+
+// Generate all 7 audio paths for a consonant family (for preloading)
+export function getFamilyAudioPaths(familyId) {
+  return VOWEL_ORDERS.map((v) => getAudioPath(familyId, v.index));
+}
+
 // Generate distractor options for quiz questions.
 // Returns an array of { consonant, orderIndex } excluding the correct answer.
 export function generateDistractors(correctConsonant, correctOrder, pool, count = 3) {

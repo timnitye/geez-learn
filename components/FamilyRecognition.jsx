@@ -3,6 +3,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useGame } from "@/context/GameContext";
 import { useSound } from "@/hooks/useSound";
+import { useAudio } from "@/hooks/useAudio";
 import {
   CONSONANT_MAP,
   CONSONANTS,
@@ -11,6 +12,8 @@ import {
   getTranslit,
   getFamily,
   generateDistractors,
+  getAudioPath,
+  getFamilyAudioPaths,
   getMasteryTier,
 } from "@/data/geez";
 import CharacterCard from "./CharacterCard";
@@ -20,8 +23,19 @@ import FeedbackOverlay from "./FeedbackOverlay";
 const ROUNDS_PER_SESSION = 10;
 
 // ── Intro Phase: "Meet the Family" ────────────────────────────────
-function FamilyIntro({ consonant, onStart }) {
+function FamilyIntro({ consonant, onStart, audio }) {
   const family = useMemo(() => getFamily(consonant), [consonant]);
+
+  // Preload all family audio when intro mounts
+  useEffect(() => {
+    const paths = getFamilyAudioPaths(consonant.id);
+    audio.preloadMany(paths);
+  }, [consonant.id, audio]);
+
+  // Play audio for a character when tapped
+  const handleCharTap = useCallback((orderIndex) => {
+    audio.play(getAudioPath(consonant.id, orderIndex));
+  }, [consonant.id, audio]);
 
   return (
     <div className="flex flex-col items-center gap-6 animate-fade-in">
@@ -40,6 +54,7 @@ function FamilyIntro({ consonant, onStart }) {
               transliteration={f.transliteration}
               size="md"
               state="glow"
+              onClick={() => handleCharTap(f.order)}
               showTranslit
             />
             <span className="text-[10px] text-slate-500">{f.orderName}</span>
@@ -48,7 +63,7 @@ function FamilyIntro({ consonant, onStart }) {
       </div>
 
       <p className="text-sm text-slate-400 text-center max-w-xs">
-        Notice how the base shape changes slightly for each vowel sound.
+        Tap each character to hear its sound.
         Look for the pattern!
       </p>
 
@@ -68,14 +83,29 @@ function QuizRound({
   targetOrder,
   options,
   onAnswer,
+  onReplay,
   roundNum,
   totalRounds,
+  autoPlayAudio,
 }) {
   const [selected, setSelected] = useState(null);
   const [revealed, setRevealed] = useState(false);
   const sound = useSound();
+  const hasPlayedRef = useRef(false);
   const targetChar = getChar(consonant, targetOrder);
   const targetTranslit = getTranslit(consonant, targetOrder);
+
+  // Auto-play audio when question appears (after first round)
+  useEffect(() => {
+    if (!hasPlayedRef.current && autoPlayAudio) {
+      hasPlayedRef.current = true;
+      // Small delay ensures UI is ready
+      const timer = setTimeout(() => {
+        autoPlayAudio();
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [autoPlayAudio]);
 
   const handleSelect = useCallback(
     (opt) => {
@@ -132,11 +162,23 @@ function QuizRound({
 
       {/* Prompt */}
       <div className="text-center">
-        <p className="text-slate-400 text-sm mb-1">Which character is</p>
-        <div className="text-3xl font-bold text-white">
-          &quot;{targetTranslit}&quot;
+        <p className="text-slate-400 text-sm mb-2">Which character is</p>
+        <div className="flex items-center justify-center gap-2">
+          <div className="text-3xl font-bold text-white">
+            &quot;{targetTranslit}&quot;
+          </div>
+          <button
+            onClick={onReplay}
+            className="w-10 h-10 flex items-center justify-center rounded-full
+                     bg-slate-700 hover:bg-slate-600 active:scale-95
+                     transition-all touch-manipulation"
+            aria-label="Replay pronunciation"
+            type="button"
+          >
+            <span className="text-lg">🔊</span>
+          </button>
         </div>
-        <p className="text-xs text-slate-500 mt-1">
+        <p className="text-xs text-slate-500 mt-2">
           ({consonant.latin} + {VOWEL_ORDERS[targetOrder].vowel} vowel)
         </p>
       </div>
@@ -222,6 +264,7 @@ export default function FamilyRecognition() {
   const [phase, setPhase] = useState("intro"); // "intro" | "quiz" | "results"
   const [roundIndex, setRoundIndex] = useState(0);
   const [sessionCorrect, setSessionCorrect] = useState(0);
+  const audio = useAudio();
 
   // Build the pool of unlocked consonants for distractors
   const pool = useMemo(
@@ -245,7 +288,27 @@ export default function FamilyRecognition() {
 
   if (!consonant) return null;
 
-  const handleStartQuiz = () => setPhase("quiz");
+  // Start quiz and play first question's audio immediately (user gesture satisfies autoplay)
+  const handleStartQuiz = () => {
+    setPhase("quiz");
+    if (rounds[0]) {
+      audio.play(getAudioPath(consonant.id, rounds[0].targetOrder));
+    }
+  };
+
+  // Replay current question's audio
+  const handleReplay = useCallback(() => {
+    if (rounds[roundIndex]) {
+      audio.play(getAudioPath(consonant.id, rounds[roundIndex].targetOrder));
+    }
+  }, [audio, consonant.id, rounds, roundIndex]);
+
+  // Auto-play callback for subsequent rounds
+  const handleAutoPlay = useCallback(() => {
+    if (rounds[roundIndex]) {
+      audio.play(getAudioPath(consonant.id, rounds[roundIndex].targetOrder));
+    }
+  }, [audio, consonant.id, rounds, roundIndex]);
 
   const handleAnswer = (isCorrect) => {
     dispatch({
@@ -286,7 +349,7 @@ export default function FamilyRecognition() {
 
       <div className="flex-1 flex items-center justify-center relative">
         {phase === "intro" && (
-          <FamilyIntro consonant={consonant} onStart={handleStartQuiz} />
+          <FamilyIntro consonant={consonant} onStart={handleStartQuiz} audio={audio} />
         )}
 
         {phase === "quiz" && rounds[roundIndex] && (
@@ -296,8 +359,10 @@ export default function FamilyRecognition() {
             targetOrder={rounds[roundIndex].targetOrder}
             options={rounds[roundIndex].options}
             onAnswer={handleAnswer}
+            onReplay={handleReplay}
             roundNum={roundIndex + 1}
             totalRounds={ROUNDS_PER_SESSION}
+            autoPlayAudio={roundIndex > 0 ? handleAutoPlay : null}
           />
         )}
 
